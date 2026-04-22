@@ -1191,6 +1191,26 @@ class LiveChat(QFrame):
         self.send_btn.setEnabled(True)
         self.input.setFocus()
 
+    def push_recommendation(self):
+        """定时推送：由 Claudio 主动根据天气和心情推荐歌曲，不显示用户气泡。"""
+        if self._worker and self._worker.isRunning():
+            return  # 正在对话中，跳过本次推送
+        hour = datetime.now().hour
+        time_labels = {12: "中午", 15: "下午三点", 18: "傍晚"}
+        time_str = time_labels.get(hour, f"{hour}点")
+        prompt = (
+            f"现在是{time_str}，请你主动根据当前天气和我们最近对话中感受到的心情，"
+            f"给我推荐 3-5 首适合现在听的歌曲，并简短说明推荐理由。"
+            f"如果合适的话可以直接帮我播放其中一首。"
+        )
+        self._current_bubble = self._add_bubble("▌", is_user=False)
+        self._worker = StreamWorker(prompt, list(self._history))
+        self._worker.chunk.connect(self._on_chunk)
+        self._worker.done.connect(self._on_done)
+        self._worker.play_song.connect(self.play_song)
+        self._worker.switch_voice.connect(self.set_voice)
+        self._worker.start()
+
     def _apply_theme(self, c):
         self.setStyleSheet(f"background:{c['BG']};")
         self.hdr.setStyleSheet(f"background:{c['BG_CARD']}; border-bottom:1px solid {c['BORDER']};")
@@ -1334,6 +1354,12 @@ class MainWindow(QMainWindow):
 
         self._start_loader()
 
+        # 定时推荐：每分钟检查，12:00 / 15:00 / 18:00 触发
+        self._rec_fired = set()
+        self._rec_timer = QTimer(self)
+        self._rec_timer.timeout.connect(self._check_recommendation)
+        self._rec_timer.start(60_000)
+
     def _tick_loading(self):
         self._loading_dots = (self._loading_dots + 1) % 4
         self._loading_lbl.setText("你的私人 Claudio 努力加载中" + "." * self._loading_dots)
@@ -1356,6 +1382,15 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(f"background:{c['BG']};")
         self._loading_page.setStyleSheet(f"background:{c['BG']};")
         self._loading_lbl.setStyleSheet(f"color:{c['TEXT']}; letter-spacing:4px;")
+
+    def _check_recommendation(self):
+        now = datetime.now()
+        key = (now.date(), now.hour)
+        if now.hour in (12, 15, 18) and now.minute == 0 and key not in self._rec_fired:
+            self._rec_fired.add(key)
+            # 只在主界面已显示且用户已登录时推送
+            if self._stack.currentIndex() == 1:
+                self.chat.push_recommendation()
 
     def _apply_splitter_style(self, c):
         self.splitter.setStyleSheet(f"""
