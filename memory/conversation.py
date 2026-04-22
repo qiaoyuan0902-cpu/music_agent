@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from datetime import datetime
 from config import DB_PATH, MAX_HISTORY_TURNS
 
@@ -20,6 +21,17 @@ def _get_conn():
             uid INTEGER NOT NULL DEFAULT 0,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_playlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uid INTEGER NOT NULL DEFAULT 0,
+            song_id INTEGER,
+            name TEXT NOT NULL,
+            artist TEXT NOT NULL DEFAULT '',
+            meta TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL
         )
     """)
@@ -53,3 +65,52 @@ def clear_history():
     """清空当前用户的对话记录"""
     with _get_conn() as conn:
         conn.execute("DELETE FROM conversations WHERE uid=?", (_current_uid,))
+
+
+# ── AI 点歌持久化 ─────────────────────────────────────────
+
+def save_ai_song(song: dict):
+    """保存 AI 点播的歌曲，同一首歌不重复存"""
+    sid = song.get("id")
+    with _get_conn() as conn:
+        if sid:
+            exists = conn.execute(
+                "SELECT 1 FROM ai_playlist WHERE uid=? AND song_id=?",
+                (_current_uid, sid)
+            ).fetchone()
+            if exists:
+                return
+        meta = json.dumps({k: v for k, v in song.items()
+                           if k not in ("id", "name", "artist")},
+                          ensure_ascii=False)
+        conn.execute(
+            "INSERT INTO ai_playlist (uid, song_id, name, artist, meta, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (_current_uid, sid, song.get("name", ""), song.get("artist", ""),
+             meta, datetime.now().isoformat())
+        )
+
+
+def load_ai_songs() -> list[dict]:
+    """加载当前用户的 AI 点歌列表，按点播顺序返回"""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT song_id, name, artist, meta FROM ai_playlist "
+            "WHERE uid=? ORDER BY id ASC",
+            (_current_uid,)
+        ).fetchall()
+    result = []
+    for song_id, name, artist, meta_str in rows:
+        try:
+            extra = json.loads(meta_str)
+        except Exception:
+            extra = {}
+        song = {"id": song_id, "name": name, "artist": artist, **extra}
+        result.append(song)
+    return result
+
+
+def clear_ai_songs():
+    """清空当前用户的 AI 点歌列表"""
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM ai_playlist WHERE uid=?", (_current_uid,))

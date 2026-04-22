@@ -3,13 +3,14 @@ import io
 import asyncio
 import tempfile
 import os
+import random
 from pathlib import Path
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFrame, QPushButton, QSlider, QScrollArea, QLineEdit,
-    QDialog, QSizePolicy, QTextEdit, QSplitter, QStackedWidget,
+    QDialog, QSizePolicy, QTextEdit, QSplitter, QStackedWidget, QTabWidget,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QObject, QUrl
 from PyQt6.QtGui import QFont, QColor, QPalette, QPainter, QBrush, QPixmap, QTextCursor
@@ -363,8 +364,45 @@ class NavBar(QFrame):
             )
 
 
+# ── WeatherWorker ─────────────────────────────────────────
+class WeatherWorker(QThread):
+    result = pyqtSignal(dict)
+
+    def run(self):
+        try:
+            from weather.locator import get_location_id
+            from weather.fetcher import get_weather
+            loc = get_location_id()
+            data = get_weather(loc)
+            print(f"[weather] {loc} → {data}")
+            self.result.emit(data)
+        except Exception as e:
+            import traceback
+            print(f"[weather] ERROR: {e}")
+            traceback.print_exc()
+
+
 # ── ClockHero ─────────────────────────────────────────────
 class ClockHero(QFrame):
+    # weather_main → emoji
+    _WEATHER_ICON = {
+        "clear":        "☀️",
+        "clouds":       "☁️",
+        "rain":         "🌧️",
+        "drizzle":      "🌦️",
+        "thunderstorm": "⛈️",
+        "snow":         "❄️",
+        "mist":         "🌫️",
+        "fog":          "🌫️",
+        "haze":         "🌫️",
+        "smoke":        "🌫️",
+        "dust":         "🌫️",
+        "sand":         "🌫️",
+        "ash":          "🌋",
+        "squall":       "🌬️",
+        "tornado":      "🌪️",
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(200)
@@ -373,9 +411,43 @@ class ClockHero(QFrame):
         lay.setSpacing(4)
         lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
+        # clock row: [left_pad] stretch [clock] stretch [weather_widget]
+        # left_pad mirrors weather_widget width so clock stays truly centered
+        clock_row = QHBoxLayout()
+        clock_row.setContentsMargins(24, 0, 24, 0)
+
         self.clock_lbl = QLabel()
         self.clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.clock_lbl.setFont(QFont("Courier New", 52, QFont.Weight.Bold))
+
+        # weather widget: icon on top, text below
+        weather_widget = QWidget()
+        weather_widget.setFixedWidth(110)
+        wlay = QVBoxLayout(weather_widget)
+        wlay.setContentsMargins(0, 0, 0, 0)
+        wlay.setSpacing(2)
+        wlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.weather_icon_lbl = QLabel()
+        self.weather_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.weather_icon_lbl.setFont(QFont("Segoe UI Emoji", 32))
+
+        self.weather_lbl = QLabel()
+        self.weather_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.weather_lbl.setFont(mono(13))
+
+        wlay.addWidget(self.weather_icon_lbl)
+        wlay.addWidget(self.weather_lbl)
+
+        # left placeholder balances weather_widget so clock is truly centered
+        left_pad = QWidget()
+        left_pad.setFixedWidth(110)
+
+        clock_row.addWidget(left_pad)
+        clock_row.addStretch()
+        clock_row.addWidget(self.clock_lbl)
+        clock_row.addStretch()
+        clock_row.addWidget(weather_widget)
 
         self.date_lbl = QLabel()
         self.date_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -390,7 +462,7 @@ class ClockHero(QFrame):
         on_air_row.addWidget(self.dot)
         on_air_row.addWidget(self.on_air_lbl)
 
-        lay.addWidget(self.clock_lbl)
+        lay.addLayout(clock_row)
         lay.addWidget(self.date_lbl)
         lay.addSpacing(6)
         lay.addLayout(on_air_row)
@@ -400,8 +472,30 @@ class ClockHero(QFrame):
         t.start(1000)
         self._tick()
 
+        # 异步拉取天气，每30分钟刷新一次
+        self._fetch_weather()
+        wt = QTimer(self)
+        wt.timeout.connect(self._fetch_weather)
+        wt.start(30 * 60 * 1000)
+
         self._apply_theme(tm().colors)
         tm().theme_changed.connect(self._apply_theme)
+
+    def _fetch_weather(self):
+        self._w_worker = WeatherWorker()
+        self._w_worker.result.connect(self._on_weather)
+        self._w_worker.start()
+
+    def _on_weather(self, data: dict):
+        desc = data.get("description", "")
+        temp = data.get("temp", "")
+        main = data.get("weather_main", "")
+        icon = self._WEATHER_ICON.get(main, "🌡️")
+        self.weather_icon_lbl.setText(icon)
+        if temp != "":
+            self.weather_lbl.setText(f"{desc}\n{temp}°C")
+        else:
+            self.weather_lbl.setText(desc)
 
     def _tick(self):
         now = datetime.now()
@@ -414,13 +508,16 @@ class ClockHero(QFrame):
         self.clock_lbl.setStyleSheet(f"color:{c['TEXT']}; letter-spacing:6px;")
         self.date_lbl.setStyleSheet(f"color:{c['TEXT_MUTED']}; letter-spacing:2px;")
         self.on_air_lbl.setStyleSheet(f"color:{c['ACCENT']}; letter-spacing:3px;")
+        self.weather_lbl.setStyleSheet(f"color:{c['TEXT_MUTED']}; letter-spacing:1px;")
+        self.weather_icon_lbl.setStyleSheet("background:transparent;")
 
 
 # ── PlayerBar ─────────────────────────────────────────────
 class PlayerBar(QFrame):
     # signals for MainWindow to call prev/next
-    request_prev = pyqtSignal()
-    request_next = pyqtSignal()
+    request_prev    = pyqtSignal()
+    request_next    = pyqtSignal()
+    shuffle_changed = pyqtSignal(bool)   # emits new shuffle state
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -438,6 +535,7 @@ class PlayerBar(QFrame):
         self._songs: list = []
         self._current_idx: int = 0
         self._seeking = False
+        self._current_song: dict = {}
 
         self._player.positionChanged.connect(self._on_position)
         self._player.durationChanged.connect(self._on_duration)
@@ -473,11 +571,14 @@ class PlayerBar(QFrame):
         mid = QHBoxLayout()
         mid.setSpacing(4)
         mid.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_prev  = QPushButton("⏮"); self.btn_prev.setFixedSize(32, 32)
-        self.btn_play  = QPushButton("▶"); self.btn_play.setFixedSize(32, 32)
-        self.btn_next  = QPushButton("⏭"); self.btn_next.setFixedSize(32, 32)
-        self.btn_stop  = QPushButton("⏹"); self.btn_stop.setFixedSize(32, 32)
-        self.ctrl_btns = [self.btn_prev, self.btn_play, self.btn_next, self.btn_stop]
+        self.btn_prev   = QPushButton("⏮"); self.btn_prev.setFixedSize(32, 32)
+        self.btn_play   = QPushButton("▶"); self.btn_play.setFixedSize(32, 32)
+        self.btn_next   = QPushButton("⏭"); self.btn_next.setFixedSize(32, 32)
+        self.btn_stop   = QPushButton("⏹"); self.btn_stop.setFixedSize(32, 32)
+        self.btn_shuffle = QPushButton("⇄"); self.btn_shuffle.setFixedSize(32, 32)
+        self.btn_shuffle.setCheckable(True)
+        self.btn_shuffle.setToolTip("随机播放")
+        self.ctrl_btns = [self.btn_prev, self.btn_play, self.btn_next, self.btn_stop, self.btn_shuffle]
         for b in self.ctrl_btns:
             b.setFont(QFont("Arial", 12))
             mid.addWidget(b)
@@ -486,6 +587,7 @@ class PlayerBar(QFrame):
         self.btn_next.clicked.connect(self.request_next)
         self.btn_play.clicked.connect(self._toggle_play)
         self.btn_stop.clicked.connect(self._stop)
+        self.btn_shuffle.clicked.connect(lambda checked: self.shuffle_changed.emit(checked))
 
         # right: volume
         right = QHBoxLayout()
@@ -532,6 +634,15 @@ class PlayerBar(QFrame):
         tm().theme_changed.connect(self._apply_theme)
 
     # ── playback control ───────────────────────────────────
+    def display_song(self, song: dict):
+        """仅更新 UI 显示，不触发播放（启动时用）"""
+        self.song_lbl.setText(f"{song['name']} - {song['artist']}")
+        self.status_lbl.setText("STOPPED")
+        self.prog.setValue(0)
+        self.t_cur.setText("0:00")
+        self.t_tot.setText(fmt_duration(song.get("duration_ms", 0)) if HAS_NETEASE else "")
+        self._current_song = song
+
     def load_song(self, song: dict):
         """Load and immediately play a song dict {id, name, artist, duration_ms}"""
         self.song_lbl.setText(f"{song['name']} - {song['artist']}")
@@ -644,6 +755,7 @@ class PlayerBar(QFrame):
                 border:1px solid {c['BORDER']}; border-radius:16px;
             }}
             QPushButton:hover {{ border-color:{c['ACCENT']}; color:{c['ACCENT']}; }}
+            QPushButton:checked {{ background:{c['ACCENT']}; color:#13111f; border-color:{c['ACCENT']}; }}
         """
         for b in self.ctrl_btns:
             b.setStyleSheet(btn_ss)
@@ -651,19 +763,31 @@ class PlayerBar(QFrame):
 
 # ── QueuePanel ────────────────────────────────────────────
 class QueuePanel(QFrame):
-    song_selected = pyqtSignal(int)  # emits index
+    song_selected    = pyqtSignal(int)   # liked songs tab → index into _songs
+    ai_song_selected = pyqtSignal(dict)  # AI tab → song dict
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._songs = []
+        self._songs   = []
         self._current = 0
-        self._rows = []
+        self._rows    = []
+        self._ai_songs = []
+        self._ai_rows  = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # header
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        outer.addWidget(self.tabs)
+
+        # ── Tab 0: QUEUE ──────────────────────────────────
+        queue_w = QWidget()
+        ql = QVBoxLayout(queue_w)
+        ql.setContentsMargins(0, 0, 0, 0)
+        ql.setSpacing(0)
+
         self.hdr_frame = QFrame()
         self.hdr_frame.setFixedHeight(32)
         hl = QHBoxLayout(self.hdr_frame)
@@ -675,9 +799,8 @@ class QueuePanel(QFrame):
         hl.addWidget(self.hdr_title)
         hl.addStretch()
         hl.addWidget(self.hdr_count)
-        outer.addWidget(self.hdr_frame)
+        ql.addWidget(self.hdr_frame)
 
-        # scroll area for rows
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -688,39 +811,59 @@ class QueuePanel(QFrame):
         self._list_lay.setSpacing(0)
         self._list_lay.addStretch()
         self.scroll.setWidget(self._container)
-        outer.addWidget(self.scroll)
+        ql.addWidget(self.scroll)
+
+        self.tabs.addTab(queue_w, "QUEUE")
+
+        # ── Tab 1: AI 点歌 ────────────────────────────────
+        ai_w = QWidget()
+        al = QVBoxLayout(ai_w)
+        al.setContentsMargins(0, 0, 0, 0)
+        al.setSpacing(0)
+
+        self.ai_hdr_frame = QFrame()
+        self.ai_hdr_frame.setFixedHeight(32)
+        ahl = QHBoxLayout(self.ai_hdr_frame)
+        ahl.setContentsMargins(16, 0, 16, 0)
+        self.ai_hdr_title = QLabel("AI 点歌")
+        self.ai_hdr_title.setFont(mono(9, True))
+        self.ai_hdr_count = QLabel("0 TRACKS")
+        self.ai_hdr_count.setFont(mono(8))
+        ahl.addWidget(self.ai_hdr_title)
+        ahl.addStretch()
+        ahl.addWidget(self.ai_hdr_count)
+        al.addWidget(self.ai_hdr_frame)
+
+        self.ai_scroll = QScrollArea()
+        self.ai_scroll.setWidgetResizable(True)
+        self.ai_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.ai_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._ai_container = QWidget()
+        self._ai_list_lay = QVBoxLayout(self._ai_container)
+        self._ai_list_lay.setContentsMargins(0, 0, 0, 0)
+        self._ai_list_lay.setSpacing(0)
+        self._ai_list_lay.addStretch()
+        self.ai_scroll.setWidget(self._ai_container)
+        al.addWidget(self.ai_scroll)
+
+        self.tabs.addTab(ai_w, "AI 点歌")
 
         self._apply_theme(tm().colors)
         tm().theme_changed.connect(self._apply_theme)
 
+    # ── liked songs ───────────────────────────────────────
     def set_songs(self, songs: list):
         self._songs = songs
         self._rows.clear()
-        # clear layout
         while self._list_lay.count() > 1:
             item = self._list_lay.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         self.hdr_count.setText(f"{len(songs)} TRACKS")
-        c = tm().colors
         for i, s in enumerate(songs):
-            row = QFrame()
-            row.setCursor(Qt.CursorShape.PointingHandCursor)
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(16, 5, 16, 5)
-            num_l = QLabel(f"{i+1:02d}")
-            num_l.setFont(mono(9))
-            num_l.setFixedWidth(24)
-            song_l = QLabel(s["name"])
-            song_l.setFont(mono(10))
-            art_l = QLabel(s["artist"])
-            art_l.setFont(mono(9))
-            rl.addWidget(num_l)
-            rl.addWidget(song_l)
-            rl.addStretch()
-            rl.addWidget(art_l)
-            self._rows.append((row, num_l, song_l, art_l))
+            row = self._make_row(s["name"], s["artist"], f"{i+1:02d}")
+            self._rows.append(row)
             idx = i
             row.mousePressEvent = lambda _, i=idx: self._select(i)
             self._list_lay.insertWidget(self._list_lay.count() - 1, row)
@@ -737,29 +880,147 @@ class QueuePanel(QFrame):
 
     def _refresh_rows(self):
         c = tm().colors
-        for i, (row, num_l, song_l, art_l) in enumerate(self._rows):
+        for i, row in enumerate(self._rows):
             playing = (i == self._current)
             if playing:
                 row.setStyleSheet(
                     f"background:{c['BG_PLAYING']}; border-left:3px solid {c['ACCENT']};"
                 )
-                num_l.setStyleSheet(f"color:{c['ACCENT']};")
-                song_l.setStyleSheet(f"color:{c['TEXT']}; font-weight:bold;")
-                art_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+                row._num_l.setStyleSheet(f"color:{c['ACCENT']};")
+                row._song_l.setStyleSheet(f"color:{c['TEXT']}; font-weight:bold;")
+                row._art_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
             else:
                 row.setStyleSheet("background:transparent; border-left:3px solid transparent;")
-                num_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
-                song_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
-                art_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+                row._num_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+                row._song_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+                row._art_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+
+    # ── AI playlist ───────────────────────────────────────
+    def add_ai_song(self, song: dict, switch_tab: bool = True):
+        """Add a song to the AI tab (dedup by id)."""
+        sid = song.get("id")
+        if sid and any(s.get("id") == sid for s in self._ai_songs):
+            if switch_tab:
+                self.tabs.setCurrentIndex(1)
+            return
+        self._ai_songs.append(song)
+        idx = len(self._ai_songs) - 1
+        row = self._make_row(song.get("name", ""), song.get("artist", ""), f"{idx+1:02d}")
+        self._ai_rows.append(row)
+        row.mousePressEvent = lambda _, s=song: self._select_ai(s)
+        self._ai_list_lay.insertWidget(self._ai_list_lay.count() - 1, row)
+        self.ai_hdr_count.setText(f"{len(self._ai_songs)} TRACKS")
+        self._refresh_ai_rows()
+        if switch_tab:
+            self.tabs.setCurrentIndex(1)
+
+    def restore_ai_songs(self, songs: list):
+        """启动时从数据库恢复 AI 点歌列表，不切换 tab"""
+        for song in songs:
+            self.add_ai_song(song, switch_tab=False)
+
+    def clear_ai_songs(self):
+        """清空 AI 点歌 UI（切换账号时调用）"""
+        self._ai_songs.clear()
+        self._ai_rows.clear()
+        while self._ai_list_lay.count() > 1:
+            item = self._ai_list_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.ai_hdr_count.setText("0 TRACKS")
+
+    def set_ai_current(self, song: dict):
+        """Highlight the currently playing AI song."""
+        sid = song.get("id")
+        self._ai_current_id = sid
+        self._refresh_ai_rows()
+
+    def _select_ai(self, song: dict):
+        self._ai_current_id = song.get("id")
+        self._refresh_ai_rows()
+        self.ai_song_selected.emit(song)
+
+    def _refresh_ai_rows(self):
+        c = tm().colors
+        cur = getattr(self, "_ai_current_id", None)
+        for i, row in enumerate(self._ai_rows):
+            playing = (self._ai_songs[i].get("id") == cur) if cur else False
+            if playing:
+                row.setStyleSheet(
+                    f"background:{c['BG_PLAYING']}; border-left:3px solid {c['ACCENT']};"
+                )
+                row._num_l.setStyleSheet(f"color:{c['ACCENT']};")
+                row._song_l.setStyleSheet(f"color:{c['TEXT']}; font-weight:bold;")
+                row._art_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+            else:
+                row.setStyleSheet("background:transparent; border-left:3px solid transparent;")
+                row._num_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+                row._song_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+                row._art_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+
+    # ── helpers ───────────────────────────────────────────
+    def _make_row(self, name: str, artist: str, num: str) -> QFrame:
+        row = QFrame()
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(16, 5, 16, 5)
+        num_l  = QLabel(num);    num_l.setFont(mono(9));  num_l.setFixedWidth(24)
+        song_l = QLabel(name);   song_l.setFont(mono(10))
+        art_l  = QLabel(artist); art_l.setFont(mono(9))
+        rl.addWidget(num_l)
+        rl.addWidget(song_l)
+        rl.addStretch()
+        rl.addWidget(art_l)
+        row._num_l  = num_l
+        row._song_l = song_l
+        row._art_l  = art_l
+        return row
 
     def _apply_theme(self, c):
-        self.setStyleSheet(f"background:{c['BG_CARD']}; border-bottom:1px solid {c['BORDER']};")
-        self.hdr_frame.setStyleSheet(f"background:{c['BG_CARD']}; border-bottom:1px solid {c['BORDER']};")
-        self.hdr_title.setStyleSheet(f"color:{c['TEXT']}; letter-spacing:2px;")
-        self.hdr_count.setStyleSheet(f"color:{c['TEXT_MUTED']};")
-        self.scroll.setStyleSheet(f"background:{c['BG_CARD']}; border:none;")
-        self._container.setStyleSheet(f"background:{c['BG_CARD']};")
+        card = c['BG_CARD']
+        border = c['BORDER']
+        accent = c['ACCENT']
+        muted  = c['TEXT_MUTED']
+        text   = c['TEXT']
+        bg     = c['BG']
+
+        self.setStyleSheet(f"background:{card};")
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background: {card};
+            }}
+            QTabBar::tab {{
+                background: {bg};
+                color: {muted};
+                padding: 6px 20px;
+                border: none;
+                font-family: Menlo, Monaco, "Courier New";
+                font-size: 9pt;
+                letter-spacing: 2px;
+                min-width: 80px;
+            }}
+            QTabBar::tab:selected {{
+                background: {card};
+                color: {accent};
+                border-bottom: 2px solid {accent};
+            }}
+            QTabBar::tab:hover {{
+                color: {text};
+            }}
+        """)
+        for frame in (self.hdr_frame, self.ai_hdr_frame):
+            frame.setStyleSheet(f"background:{card}; border-bottom:1px solid {border};")
+        self.hdr_title.setStyleSheet(f"color:{text}; letter-spacing:2px;")
+        self.hdr_count.setStyleSheet(f"color:{muted};")
+        self.ai_hdr_title.setStyleSheet(f"color:{text}; letter-spacing:2px;")
+        self.ai_hdr_count.setStyleSheet(f"color:{muted};")
+        for s in (self.scroll, self.ai_scroll):
+            s.setStyleSheet(f"background:{card}; border:none;")
+        for cont in (self._container, self._ai_container):
+            cont.setStyleSheet(f"background:{card};")
         self._refresh_rows()
+        self._refresh_ai_rows()
 
 
 # ── QR 后台 Worker ────────────────────────────────────────
@@ -968,7 +1229,7 @@ class LiveChat(QFrame):
         self._current_bubble = None
         self._worker = None
         self._tts_worker = None
-        self._tts_muted = False
+        self._tts_muted = True
         self._tts_voice = DEFAULT_VOICE
         self._username = "You"
 
@@ -998,7 +1259,7 @@ class LiveChat(QFrame):
         self.live_lbl = QLabel("LIVE")
         self.live_lbl.setFont(mono(8, True))
         # mute toggle
-        self.mute_btn = QPushButton("🔊")
+        self.mute_btn = QPushButton("🔇")
         self.mute_btn.setFixedSize(28, 28)
         self.mute_btn.setToolTip("静音 / 取消静音")
         self.mute_btn.clicked.connect(self._toggle_mute)
@@ -1345,12 +1606,16 @@ class MainWindow(QMainWindow):
         self._apply_splitter_style(tm().colors)
         tm().theme_changed.connect(self._apply_splitter_style)
         self.queue.song_selected.connect(self._on_song_selected)
+        self.queue.ai_song_selected.connect(self._on_ai_song_selected)
         self.player.request_prev.connect(self._on_prev)
         self.player.request_next.connect(self._on_next)
+        self.player.shuffle_changed.connect(self._on_shuffle_changed)
         self.nav.login_clicked.connect(self._show_qr_dialog)
         self.chat.play_song.connect(self._on_chat_play)
         tm().theme_changed.connect(self._apply_bg)
         self._apply_bg(tm().colors)
+
+        self._shuffle = False
 
         self._start_loader()
 
@@ -1422,7 +1687,9 @@ class MainWindow(QMainWindow):
         self._show_main()
         if songs:
             self.queue.set_songs(songs)
-            self._on_song_selected(0)
+            # 启动时只显示第一首，不自动播放
+            self.queue.set_current(0)
+            self.player.display_song(songs[0])
             if HAS_NETEASE:
                 try:
                     profile = get_user_profile()
@@ -1434,6 +1701,12 @@ class MainWindow(QMainWindow):
                     self.nav.set_logged_in(nickname)
                     self.chat.set_username(nickname)
                     self.chat.reload_history()
+                    # 恢复该账号的 AI 点歌列表
+                    self.queue.clear_ai_songs()
+                    if conv_store:
+                        ai_songs = conv_store.load_ai_songs()
+                        if ai_songs:
+                            self.queue.restore_ai_songs(ai_songs)
                     self.status.set_status("● CONNECTED")
                 except Exception:
                     pass
@@ -1444,6 +1717,9 @@ class MainWindow(QMainWindow):
             return
         self.queue.set_current(idx)
         self.player.load_song(songs[idx])
+
+    def _on_shuffle_changed(self, enabled: bool):
+        self._shuffle = enabled
 
     def _on_prev(self):
         songs = self.queue._songs
@@ -1456,11 +1732,27 @@ class MainWindow(QMainWindow):
         songs = self.queue._songs
         if not songs:
             return
-        idx = (self.queue._current + 1) % len(songs)
+        if self._shuffle:
+            current = self.queue._current
+            choices = [i for i in range(len(songs)) if i != current]
+            idx = random.choice(choices) if choices else current
+        else:
+            idx = (self.queue._current + 1) % len(songs)
         self._on_song_selected(idx)
 
+    def _on_ai_song_selected(self, song: dict):
+        self.queue.set_ai_current(song)
+        self.player.load_song(song)
+
     def _on_chat_play(self, song: dict):
-        """AI 要求播放某首歌：直接加载，不改变歌单"""
+        """AI 要求播放某首歌：加入 AI 点歌列表并播放"""
+        self.queue.add_ai_song(song)
+        self.queue.set_ai_current(song)
+        if conv_store:
+            try:
+                conv_store.save_ai_song(song)
+            except Exception:
+                pass
         self.player.load_song(song)
 
 

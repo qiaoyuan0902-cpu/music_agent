@@ -1,6 +1,6 @@
 import json
 from music.netease import search_netease
-from weather.locator import get_city_by_ip
+from weather.locator import get_location_id
 from weather.fetcher import get_weather
 from weather.mood_mapper import weather_to_prompt_text
 from memory import profile as profile_store
@@ -45,8 +45,8 @@ def _execute(tool_name: str, inp: dict):
         return {"__switch_voice__": True, "voice_id": voice_id, "voice_name": name}
 
     elif tool_name == "get_current_weather":
-        city = inp.get("city") or get_city_by_ip()
-        weather = get_weather(city)
+        loc = inp.get("city") or get_location_id()
+        weather = get_weather(loc)
         return {**weather, "music_suggestion": weather_to_prompt_text(weather)}
 
     elif tool_name == "update_user_profile":

@@ -8,7 +8,7 @@ load_dotenv()
 # 支持 ANTHROPIC_AUTH_TOKEN（Bilibili 内部代理）或标准 ANTHROPIC_API_KEY
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "")
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
+QWEATHER_API_KEY = os.getenv("QWEATHER_API_KEY", "")
 
 # ── 模型配置 ──────────────────────────────────────────────
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")

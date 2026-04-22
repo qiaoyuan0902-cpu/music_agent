@@ -1,17 +1,17 @@
 from datetime import datetime
-from weather.locator import get_city_by_ip
+from weather.locator import get_location_id
 from weather.fetcher import get_weather
 from weather.mood_mapper import weather_to_prompt_text
 from memory import profile as profile_store
 
-_city_cache = {"city": None}
+_loc_cache = {"id": None}
 
 
 def build_system_prompt() -> str:
     # 天气信息
-    if not _city_cache["city"]:
-        _city_cache["city"] = get_city_by_ip()
-    weather = get_weather(_city_cache["city"])
+    if not _loc_cache["id"]:
+        _loc_cache["id"] = get_location_id()
+    weather = get_weather(_loc_cache["id"])
     weather_text = weather_to_prompt_text(weather)
 
     # 用户画像
