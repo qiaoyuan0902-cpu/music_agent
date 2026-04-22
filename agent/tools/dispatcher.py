@@ -1,7 +1,4 @@
 import json
-from music.spotify import search_tracks, get_recommendations, get_artist_top_tracks
-from music.lastfm import get_similar_artists, get_top_tracks_by_tag
-from music.genius import get_lyrics
 from music.netease import search_netease
 from weather.locator import get_city_by_ip
 from weather.fetcher import get_weather
@@ -10,7 +7,6 @@ from memory import profile as profile_store
 
 
 def dispatch(tool_name: str, tool_input: dict) -> str:
-    """路由工具调用，返回 JSON 字符串结果"""
     try:
         result = _execute(tool_name, tool_input)
     except Exception as e:
@@ -26,16 +22,13 @@ def _execute(tool_name: str, inp: dict):
         songs = search_netease(query, limit=1)
         if not songs:
             return {"error": "未找到该歌曲，请换个关键词试试"}
-        song = songs[0]
-        # 返回结果中带 __play__ 标记，StreamWorker 识别后触发播放
-        return {"__play__": True, **song}
+        return {"__play__": True, **songs[0]}
 
     elif tool_name == "switch_tts_voice":
         from ui.qt_app import VOICES
         name = inp.get("voice_name", "")
         voice_id = VOICES.get(name)
         if not voice_id:
-            # 模糊匹配：男声/女声关键词
             name_lower = name.lower()
             if "男" in name_lower:
                 voice_id = "zh-CN-YunxiNeural"; name = "云希"
@@ -50,29 +43,6 @@ def _execute(tool_name: str, inp: dict):
             else:
                 return {"error": f"未找到声音'{name}'，可用：晓晓、晓伊、小北、小妮、云希、云健、云夏、云扬、晓佳、云龙、晓臻、云哲"}
         return {"__switch_voice__": True, "voice_id": voice_id, "voice_name": name}
-
-    elif tool_name == "search_tracks":
-        return search_tracks(inp["query"], inp.get("limit", 5))
-
-    elif tool_name == "get_recommendations":
-        return get_recommendations(
-            seed_artists=inp.get("seed_artists"),
-            seed_genres=inp.get("seed_genres"),
-            seed_tracks=inp.get("seed_tracks"),
-            limit=inp.get("limit", 6)
-        )
-
-    elif tool_name == "get_artist_top_tracks":
-        return get_artist_top_tracks(inp["artist_name"])
-
-    elif tool_name == "get_similar_artists":
-        return get_similar_artists(inp["artist"], inp.get("limit", 5))
-
-    elif tool_name == "get_tracks_by_mood":
-        return get_top_tracks_by_tag(inp["tag"], inp.get("limit", 6))
-
-    elif tool_name == "get_lyrics":
-        return get_lyrics(inp["song"], inp.get("artist", ""))
 
     elif tool_name == "get_current_weather":
         city = inp.get("city") or get_city_by_ip()

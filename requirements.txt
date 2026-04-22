@@ -5,12 +5,8 @@ anthropic>=0.96.0
 pyncm>=1.5.0
 qrcode[pil]>=7.4.0
 
-# Music metadata / lyrics
+# Weather
 requests>=2.31.0
-beautifulsoup4>=4.12.0
-
-# Spotify / Last.fm / Weather APIs
-# (also use requests above)
 
 # UI
 PyQt6>=6.6.0

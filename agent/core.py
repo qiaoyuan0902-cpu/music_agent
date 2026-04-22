@@ -165,12 +165,6 @@ class MusicAgent:
 _TOOL_HINTS = {
     "play_song":         "正在搜索并准备播放...",
     "switch_tts_voice":  "正在切换声音...",
-    "search_tracks":     "正在搜索歌曲...",
-    "get_recommendations": "正在获取推荐...",
-    "get_artist_top_tracks": "正在获取艺术家热门歌曲...",
-    "get_similar_artists": "正在查找相似艺术家...",
-    "get_tracks_by_mood": "正在按心情筛选歌曲...",
-    "get_lyrics": "正在获取歌词...",
     "get_current_weather": "正在获取天气信息...",
     "update_user_profile": "正在记录你的偏好...",
 }
