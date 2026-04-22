@@ -3,12 +3,13 @@ import io
 import asyncio
 import tempfile
 import os
+from pathlib import Path
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFrame, QPushButton, QSlider, QScrollArea, QLineEdit,
-    QDialog, QSizePolicy, QTextEdit, QSplitter,
+    QDialog, QSizePolicy, QTextEdit, QSplitter, QStackedWidget,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QObject, QUrl
 from PyQt6.QtGui import QFont, QColor, QPalette, QPainter, QBrush, QPixmap, QTextCursor
@@ -442,6 +443,8 @@ class PlayerBar(QFrame):
         self._player.durationChanged.connect(self._on_duration)
         self._player.playbackStateChanged.connect(self._on_state)
         self._player.mediaStatusChanged.connect(self._on_media_status)
+        self._media_devices = QMediaDevices()
+        self._media_devices.audioOutputsChanged.connect(self._on_audio_device_changed)
 
         # ── layout ─────────────────────────────────────────
         lay = QVBoxLayout(self)
@@ -540,6 +543,13 @@ class PlayerBar(QFrame):
         self._url_worker = UrlFetchWorker(song["id"])
         self._url_worker.url_ready.connect(self._on_url_ready)
         self._url_worker.start()
+
+    def _on_audio_device_changed(self):
+        """蓝牙耳机断开重连等设备变化时，重新绑定默认输出设备"""
+        vol = self.vol.value() / 100
+        self._audio_out = QAudioOutput(QMediaDevices.defaultAudioOutput())
+        self._audio_out.setVolume(vol)
+        self._player.setAudioOutput(self._audio_out)
 
     def _on_url_ready(self, url: str):
         if not url:
@@ -893,20 +903,16 @@ class ChatBubble(QFrame):
         lay.setContentsMargins(12, 3, 12, 3)
         lay.setSpacing(8)
 
-        c = tm().colors
-        bubble = QFrame()
-        bubble.setStyleSheet(f"background:#221f38; border-radius:12px; border:1px solid {c['BORDER']};")
-        bl = QVBoxLayout(bubble)
+        self._bubble = QFrame()
+        bl = QVBoxLayout(self._bubble)
         bl.setContentsMargins(10, 6, 10, 6)
         bl.setSpacing(2)
 
         meta = QHBoxLayout()
         self.uname_lbl = QLabel(username)
         self.uname_lbl.setFont(mono(8, True))
-        self.uname_lbl.setStyleSheet(f"color:{c['ACCENT']};")
         self.ts_lbl = QLabel(timestamp)
         self.ts_lbl.setFont(mono(7))
-        self.ts_lbl.setStyleSheet(f"color:{c['TEXT_MUTED']};")
         meta.addWidget(self.uname_lbl)
         meta.addStretch()
         meta.addWidget(self.ts_lbl)
@@ -914,27 +920,39 @@ class ChatBubble(QFrame):
         self.text_lbl = QLabel(text)
         self.text_lbl.setWordWrap(True)
         self.text_lbl.setFont(mono(11))
-        self.text_lbl.setStyleSheet(f"color:{c['TEXT']};")
         self.text_lbl.setMaximumWidth(300)
         self.text_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         bl.addLayout(meta)
         bl.addWidget(self.text_lbl)
 
-        avatar = QLabel("DJ" if not is_user else username[:2])
-        avatar.setFixedSize(32, 32)
-        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avatar.setFont(mono(7, True))
-        avatar.setStyleSheet(f"background:{c['ACCENT']}; color:#13111f; border-radius:16px;")
+        self._avatar = QLabel("DJ" if not is_user else username[:2])
+        self._avatar.setFixedSize(32, 32)
+        self._avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._avatar.setFont(mono(7, True))
 
         if is_user:
             lay.addStretch()
-            lay.addWidget(bubble)
-            lay.addWidget(avatar)
+            lay.addWidget(self._bubble)
+            lay.addWidget(self._avatar)
         else:
-            lay.addWidget(avatar)
-            lay.addWidget(bubble)
+            lay.addWidget(self._avatar)
+            lay.addWidget(self._bubble)
             lay.addStretch()
+
+        self._apply_theme(tm().colors)
+        tm().theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self, c):
+        self._bubble.setStyleSheet(
+            f"background:{c['BG_CARD']}; border-radius:12px; border:1px solid {c['BORDER']};"
+        )
+        self.uname_lbl.setStyleSheet(f"color:{c['ACCENT']};")
+        self.ts_lbl.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+        self.text_lbl.setStyleSheet(f"color:{c['TEXT']};")
+        self._avatar.setStyleSheet(
+            f"background:{c['ACCENT']}; color:#13111f; border-radius:16px;"
+        )
 
     def update_text(self, text: str):
         self.text_lbl.setText(text)
@@ -962,6 +980,8 @@ class LiveChat(QFrame):
         self._audio_out.setVolume(1.0)
         self._tts_tmp_path = None
         self._player.playbackStateChanged.connect(self._on_playback_state)
+        self._media_devices = QMediaDevices()
+        self._media_devices.audioOutputsChanged.connect(self._on_audio_device_changed)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -1032,7 +1052,7 @@ class LiveChat(QFrame):
 
         self._apply_theme(tm().colors)
         tm().theme_changed.connect(self._apply_theme)
-        self._load_history()
+        # 不在此处加载历史，等账号确认后由 reload_history() 调用
 
     def _toggle_mute(self):
         self._tts_muted = not self._tts_muted
@@ -1098,6 +1118,11 @@ class LiveChat(QFrame):
         self._tts_worker = TTSWorker(clean, voice=self._tts_voice)
         self._tts_worker.audio_ready.connect(self._on_audio_ready)
         self._tts_worker.start()
+
+    def _on_audio_device_changed(self):
+        self._audio_out = QAudioOutput(QMediaDevices.defaultAudioOutput())
+        self._audio_out.setVolume(1.0)
+        self._player.setAudioOutput(self._audio_out)
 
     def _on_audio_ready(self, path: str):
         self._tts_tmp_path = path
@@ -1227,6 +1252,9 @@ class StatusBar(QFrame):
         self.left.setStyleSheet(f"color:{c['TEXT_MUTED']}; letter-spacing:2px;")
         self.right.setStyleSheet(f"color:{c['ACCENT']}; letter-spacing:1px;")
 
+    def set_status(self, text: str):
+        self.right.setText(text)
+
 
 # ── MainWindow ────────────────────────────────────────────
 class MainWindow(QMainWindow):
@@ -1243,29 +1271,59 @@ class MainWindow(QMainWindow):
         self.chat   = LiveChat()
         self.status = StatusBar()
 
-        root = QWidget()
-        self.setCentralWidget(root)
-        lay = QVBoxLayout(root)
+        # ── 加载遮罩页 ──────────────────────────────────────
+        self._loading_page = QWidget()
+        self._loading_page.setObjectName("loadingPage")
+        ll = QVBoxLayout(self._loading_page)
+        ll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ll.setSpacing(20)
+
+        # 加载图
+        _img_path = str(Path(__file__).parent.parent / "加载图.png")
+        self._loading_img = QLabel()
+        self._loading_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _px = QPixmap(_img_path)
+        if not _px.isNull():
+            _px = _px.scaled(200, 260, Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+        self._loading_img.setPixmap(_px)
+        ll.addWidget(self._loading_img)
+
+        self._loading_lbl = QLabel("你的私人 Claudio 努力加载中...")
+        self._loading_lbl.setFont(mono(16, True))
+        self._loading_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ll.addWidget(self._loading_lbl)
+        self._loading_dots = 0
+        self._loading_timer = QTimer(self)
+        self._loading_timer.timeout.connect(self._tick_loading)
+
+        # ── 主内容页 ────────────────────────────────────────
+        main_page = QWidget()
+        lay = QVBoxLayout(main_page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self.nav)
         lay.addWidget(self.clock)
         lay.addWidget(self.player)
 
-        # splitter: queue on top, chat on bottom — user can drag the handle
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.addWidget(self.queue)
         self.splitter.addWidget(self.chat)
-        self.splitter.setSizes([220, 440])   # initial proportions
+        self.splitter.setSizes([220, 440])
         self.splitter.setHandleWidth(6)
         lay.addWidget(self.splitter, 1)
-
         lay.addWidget(self.status)
+
+        # ── Stack ───────────────────────────────────────────
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._loading_page)   # index 0
+        self._stack.addWidget(main_page)            # index 1
+        self._stack.setCurrentIndex(0)
+        self.setCentralWidget(self._stack)
 
         self._apply_splitter_style(tm().colors)
         tm().theme_changed.connect(self._apply_splitter_style)
-
         self.queue.song_selected.connect(self._on_song_selected)
         self.player.request_prev.connect(self._on_prev)
         self.player.request_next.connect(self._on_next)
@@ -1274,15 +1332,30 @@ class MainWindow(QMainWindow):
         tm().theme_changed.connect(self._apply_bg)
         self._apply_bg(tm().colors)
 
-        # 启动时加载 session / 歌单
+        self._start_loader()
+
+    def _tick_loading(self):
+        self._loading_dots = (self._loading_dots + 1) % 4
+        self._loading_lbl.setText("你的私人 Claudio 努力加载中" + "." * self._loading_dots)
+
+    def _show_main(self):
+        self._loading_timer.stop()
+        self._stack.setCurrentIndex(1)
+
+    def _start_loader(self):
+        self._loading_dots = 0
+        self._loading_lbl.setText("你的私人 Claudio 努力加载中...")
+        self._loading_timer.start(400)
+        self.status.set_status("● 正在加载歌单...")
         self._loader = SongLoaderWorker()
         self._loader.songs_loaded.connect(self._on_songs_loaded)
-        self._loader.need_login.connect(self._show_qr_dialog)
+        self._loader.need_login.connect(self._on_need_login)
         self._loader.start()
 
     def _apply_bg(self, c):
         self.setStyleSheet(f"background:{c['BG']};")
-        self.centralWidget().setStyleSheet(f"background:{c['BG']};")
+        self._loading_page.setStyleSheet(f"background:{c['BG']};")
+        self._loading_lbl.setStyleSheet(f"color:{c['TEXT']}; letter-spacing:4px;")
 
     def _apply_splitter_style(self, c):
         self.splitter.setStyleSheet(f"""
@@ -1296,6 +1369,11 @@ class MainWindow(QMainWindow):
             }}
         """)
 
+    def _on_need_login(self):
+        self._show_main()
+        self.status.set_status("● 未登录")
+        self._show_qr_dialog()
+
     def _show_qr_dialog(self):
         dlg = QRLoginDialog(self)
         dlg.login_success.connect(self._after_login)
@@ -1303,12 +1381,10 @@ class MainWindow(QMainWindow):
 
     def _after_login(self):
         self.chat.clear_chat()
-        self._loader = SongLoaderWorker()
-        self._loader.songs_loaded.connect(self._on_songs_loaded)
-        self._loader.need_login.connect(self._show_qr_dialog)
-        self._loader.start()
+        self._start_loader()
 
     def _on_songs_loaded(self, songs: list):
+        self._show_main()
         if songs:
             self.queue.set_songs(songs)
             self._on_song_selected(0)
@@ -1323,6 +1399,7 @@ class MainWindow(QMainWindow):
                     self.nav.set_logged_in(nickname)
                     self.chat.set_username(nickname)
                     self.chat.reload_history()
+                    self.status.set_status("● CONNECTED")
                 except Exception:
                     pass
 

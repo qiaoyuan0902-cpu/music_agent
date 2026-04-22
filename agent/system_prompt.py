@@ -20,7 +20,7 @@ def build_system_prompt() -> str:
 
     now = datetime.now().strftime("%Y年%m月%d日 %H:%M")
 
-    return f"""你是一个 24 小时全天候的 AI 音乐伴侣，名叫「音乐小助手」。
+    return f"""你是一个 24 小时全天候的 AI 音乐伴侣，名叫「Claudio」。
 
 ## 当前信息
 - 时间：{now}
