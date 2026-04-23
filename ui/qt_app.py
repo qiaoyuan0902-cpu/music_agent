@@ -572,13 +572,13 @@ class PlayerBar(QFrame):
         self._audio_out = QAudioOutput(_dev)
         self._player.setAudioOutput(self._audio_out)
         self._audio_out.setVolume(0.7)
-        self._player.errorOccurred.connect(
-            lambda err, msg: print(f"[player] error {err}: {msg}")
-        )
+        self._player.errorOccurred.connect(self._on_player_error)
         self._songs: list = []
         self._current_idx: int = 0
         self._seeking = False
         self._current_song: dict = {}
+        self._retry_count: int = 0
+        self._url_worker = None
 
         self._player.positionChanged.connect(self._on_position)
         self._player.durationChanged.connect(self._on_duration)
@@ -694,6 +694,14 @@ class PlayerBar(QFrame):
         self.t_cur.setText("0:00")
         self.t_tot.setText(fmt_duration(song.get("duration_ms", 0)) if HAS_NETEASE else "")
         self._player.stop()
+        self._current_song = song
+        self._retry_count = 0
+        # Disconnect previous worker to avoid stale signal firing
+        if hasattr(self, "_url_worker") and self._url_worker is not None:
+            try:
+                self._url_worker.url_ready.disconnect()
+            except Exception:
+                pass
         self._url_worker = UrlFetchWorker(song["id"])
         self._url_worker.url_ready.connect(self._on_url_ready)
         self._url_worker.start()
@@ -765,6 +773,34 @@ class PlayerBar(QFrame):
     def _on_media_status(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.request_next.emit()
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            # URL 失效（过期或网络问题），重新拉取一次
+            self._retry_url()
+
+    def _on_player_error(self, err, msg: str):
+        print(f"[player] error {err}: {msg}")
+        self._retry_url()
+
+    def _retry_url(self):
+        """URL 失效时重新拉取，最多重试 1 次，失败则跳下一首"""
+        if not self._current_song:
+            return
+        if getattr(self, "_retry_count", 0) >= 1:
+            print("[player] retry exhausted, skipping to next")
+            self.status_lbl.setText("链接失效，跳过")
+            self.request_next.emit()
+            return
+        self._retry_count = getattr(self, "_retry_count", 0) + 1
+        print(f"[player] retrying URL for {self._current_song.get('name')}")
+        self.status_lbl.setText("重新获取链接...")
+        if hasattr(self, "_url_worker") and self._url_worker is not None:
+            try:
+                self._url_worker.url_ready.disconnect()
+            except Exception:
+                pass
+        self._url_worker = UrlFetchWorker(self._current_song["id"])
+        self._url_worker.url_ready.connect(self._on_url_ready)
+        self._url_worker.start()
 
     def _anim(self):
         self._fi = (self._fi + 1) % len(self._frames)
