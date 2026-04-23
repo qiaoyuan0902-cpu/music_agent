@@ -45,9 +45,7 @@ def is_configured() -> bool:
             has_key = True
         if line.startswith("ANTHROPIC_API_KEY=") and line.split("=", 1)[1].strip():
             has_key = True
-    if provider and has_key:
-        return True
-    return has_key  # 旧格式兼容
+    return provider != "" and has_key
 
 
 def save_config(provider: str, api_key: str, base_url: str = "", model: str = ""):
