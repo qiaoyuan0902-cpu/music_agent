@@ -53,7 +53,7 @@ def save_config(anthropic_key: str, qweather_key: str, base_url: str = ""):
     env_path = get_env_path()
     lines = [
         "# Claudio FM — 自动生成，可手动编辑",
-        f"ANTHROPIC_API_KEY={anthropic_key.strip()}",
+        f"ANTHROPIC_AUTH_TOKEN={anthropic_key.strip()}",
         f"QWEATHER_API_KEY={qweather_key.strip()}",
     ]
     if base_url.strip():

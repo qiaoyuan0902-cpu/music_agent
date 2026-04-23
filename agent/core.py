@@ -8,12 +8,16 @@ from memory import conversation as conv_store
 
 
 def _make_client() -> anthropic.Anthropic:
-    """每次调用时读取最新的环境变量，确保向导保存后能生效"""
-    api_key = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("ANTHROPIC_API_KEY", "")
+    """每次调用时读取最新的环境变量，确保向导保存后能生效。
+    当设置了 base_url（自定义代理）时，同时传 auth_token，
+    让 SDK 发 Authorization: Bearer header，兼容 Bilibili 等代理。
+    """
+    token = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("ANTHROPIC_API_KEY", "")
     base_url = os.getenv("ANTHROPIC_BASE_URL", "")
-    kwargs = {"api_key": api_key}
+    kwargs: dict = {"api_key": token}
     if base_url:
         kwargs["base_url"] = base_url
+        kwargs["auth_token"] = token   # 代理需要 Authorization: Bearer header
     return anthropic.Anthropic(**kwargs)
 
 
