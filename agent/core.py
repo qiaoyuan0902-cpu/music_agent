@@ -1,17 +1,25 @@
+import os
 import anthropic
-from config import ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_MODEL, MAX_TOKENS
+from config import CLAUDE_MODEL, MAX_TOKENS
 from agent.system_prompt import build_system_prompt
 from agent.tools.definitions import TOOLS
 from agent.tools.dispatcher import dispatch
 from memory import conversation as conv_store
 
 
+def _make_client() -> anthropic.Anthropic:
+    """每次调用时读取最新的环境变量，确保向导保存后能生效"""
+    api_key = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("ANTHROPIC_API_KEY", "")
+    base_url = os.getenv("ANTHROPIC_BASE_URL", "")
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return anthropic.Anthropic(**kwargs)
+
+
 class MusicAgent:
     def __init__(self):
-        kwargs = {"api_key": ANTHROPIC_API_KEY}
-        if ANTHROPIC_BASE_URL:
-            kwargs["base_url"] = ANTHROPIC_BASE_URL
-        self.client = anthropic.Anthropic(**kwargs)
+        pass  # client 在每次请求时创建，确保读到最新 key
 
     def chat(self, user_message: str, history: list[list]) -> str:
         """
@@ -28,7 +36,7 @@ class MusicAgent:
 
         # Agentic loop
         while True:
-            response = self.client.messages.create(
+            response = _make_client().messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=MAX_TOKENS,
                 system=system_prompt,
@@ -80,7 +88,7 @@ class MusicAgent:
         full_response = ""
 
         while True:
-            with self.client.messages.stream(
+            with _make_client().messages.stream(
                 model=CLAUDE_MODEL,
                 max_tokens=MAX_TOKENS,
                 system=system_prompt,
