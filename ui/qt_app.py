@@ -338,7 +338,8 @@ class PulseDot(QWidget):
 
 # ── NavBar ────────────────────────────────────────────────
 class NavBar(QFrame):
-    login_clicked = pyqtSignal()
+    login_clicked   = pyqtSignal()
+    settings_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -354,6 +355,12 @@ class NavBar(QFrame):
         self.login_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
         self.login_lbl.mousePressEvent = lambda _: self.login_clicked.emit()
 
+        self.settings_lbl = QLabel("⚙")
+        self.settings_lbl.setFont(mono(12))
+        self.settings_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_lbl.setToolTip("重新配置 API Key")
+        self.settings_lbl.mousePressEvent = lambda _: self.settings_clicked.emit()
+
         self.toggle_lbl = QLabel()
         self.toggle_lbl.setFont(mono(9, True))
         self.toggle_lbl.setFixedHeight(22)
@@ -363,6 +370,7 @@ class NavBar(QFrame):
         right = QHBoxLayout()
         right.setSpacing(10)
         right.addWidget(self.login_lbl)
+        right.addWidget(self.settings_lbl)
         right.addWidget(self.toggle_lbl)
 
         lay.addWidget(self.logo)
@@ -383,9 +391,9 @@ class NavBar(QFrame):
         self.setStyleSheet(f"background:{c['BG_CARD']}; border-bottom:1px solid {c['BORDER']};")
         self.logo.setStyleSheet(f"color:{c['ACCENT']}; letter-spacing:2px;")
         self.login_lbl.setStyleSheet(
-            f"color:{c['TEXT_MUTED']}; letter-spacing:1px;"
-            f" text-decoration:underline;"
+            f"color:{c['TEXT_MUTED']}; letter-spacing:1px; text-decoration:underline;"
         )
+        self.settings_lbl.setStyleSheet(f"color:{c['TEXT_MUTED']};")
         label = "  DARK  " if tm().is_dark() else "  LIGHT  "
         self.toggle_lbl.setText(label)
         if tm().is_dark():
@@ -1769,6 +1777,7 @@ class MainWindow(QMainWindow):
         self.player.shuffle_changed.connect(self._on_shuffle_changed)
         self.player.position_changed.connect(self.queue.update_lyrics_position)
         self.nav.login_clicked.connect(self._show_qr_dialog)
+        self.nav.settings_clicked.connect(self._show_settings)
         self.chat.play_song.connect(self._on_chat_play)
         tm().theme_changed.connect(self._apply_bg)
         self._apply_bg(tm().colors)
@@ -1832,6 +1841,14 @@ class MainWindow(QMainWindow):
         self._show_main()
         self.status.set_status("● 未登录")
         self._show_qr_dialog()
+
+    def _show_settings(self):
+        from ui.setup_wizard import SetupWizard, get_env_path
+        from dotenv import load_dotenv
+        wizard = SetupWizard(self)
+        if wizard.exec() == SetupWizard.DialogCode.Accepted:
+            load_dotenv(get_env_path(), override=True)
+            self.status.set_status("● 配置已更新，重启后生效")
 
     def _show_qr_dialog(self):
         dlg = QRLoginDialog(self)
