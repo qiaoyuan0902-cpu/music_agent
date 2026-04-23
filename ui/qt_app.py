@@ -1120,6 +1120,9 @@ class QueuePanel(QFrame):
 
         self.setStyleSheet(f"background:{card};")
         self.tabs.setStyleSheet(f"""
+            QTabWidget {{
+                background: {bg};
+            }}
             QTabWidget::pane {{
                 border: none;
                 background: {card};
@@ -1129,6 +1132,7 @@ class QueuePanel(QFrame):
             }}
             QTabBar {{
                 background: {bg};
+                border: none;
             }}
             QTabBar::tab {{
                 background: {bg};
@@ -1152,6 +1156,13 @@ class QueuePanel(QFrame):
                 width: 0px;
             }}
         """)
+        # Force tab bar background via palette to cover the right-side gap
+        from PyQt6.QtGui import QPalette, QColor as _QColor
+        pal = self.tabs.tabBar().palette()
+        pal.setColor(QPalette.ColorRole.Window, _QColor(bg))
+        pal.setColor(QPalette.ColorRole.Button, _QColor(bg))
+        self.tabs.tabBar().setPalette(pal)
+        self.tabs.tabBar().setAutoFillBackground(True)
         for frame in (self.hdr_frame, self.ai_hdr_frame, self.lyrics_hdr_frame):
             frame.setStyleSheet(f"background:{card}; border-bottom:1px solid {border};")
         self.hdr_title.setStyleSheet(f"color:{text}; letter-spacing:2px;")
