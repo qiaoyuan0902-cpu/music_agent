@@ -257,19 +257,26 @@ class StreamWorker(QThread):
             self.done.emit()
             return
         import json as _json
-        for c in _agent.chat_stream(self.message, self.history):
-            if isinstance(c, str) and c.startswith("__PLAY_SONG__"):
-                try:
-                    song = _json.loads(c[len("__PLAY_SONG__"):])
-                    self.play_song.emit(song)
-                except Exception:
-                    pass
-            elif isinstance(c, str) and c.startswith("__SWITCH_VOICE__"):
-                voice_id = c[len("__SWITCH_VOICE__"):]
-                self.switch_voice.emit(voice_id)
-            else:
-                self.chunk.emit(c)
-        self.done.emit()
+        try:
+            for c in _agent.chat_stream(self.message, self.history):
+                if isinstance(c, str) and c.startswith("__PLAY_SONG__"):
+                    try:
+                        song = _json.loads(c[len("__PLAY_SONG__"):])
+                        self.play_song.emit(song)
+                    except Exception:
+                        pass
+                elif isinstance(c, str) and c.startswith("__SWITCH_VOICE__"):
+                    voice_id = c[len("__SWITCH_VOICE__"):]
+                    self.switch_voice.emit(voice_id)
+                else:
+                    self.chunk.emit(c)
+        except Exception as e:
+            import traceback
+            err = traceback.format_exc()
+            print(f"[StreamWorker] ERROR:\n{err}")
+            self.chunk.emit(f"\n\n⚠️ 出错了：{e}")
+        finally:
+            self.done.emit()
 
 
 # ── PulseDot ──────────────────────────────────────────────
@@ -1757,9 +1764,10 @@ class MainWindow(QMainWindow):
 
 
 # ── launch ────────────────────────────────────────────────
-def launch():
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+def launch(app: QApplication = None):
+    if app is None:
+        app = QApplication(sys.argv)
+        app.setStyle("Fusion")
     p = QPalette()
     c = tm().colors
     p.setColor(QPalette.ColorRole.Window,     QColor(c["BG"]))

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH)
+VENV = ROOT / '.venv' / 'lib' / 'python3.14' / 'site-packages'
 
 block_cipher = None
 
@@ -18,12 +19,18 @@ a = Analysis(
     datas=[
         # 加载图
         (str(ROOT / '加载图.png'), '.'),
-        # edge-tts 内部数据
-        (str(ROOT / '.venv/lib/python3.14/site-packages/edge_tts'), 'edge_tts'),
-        # speech_recognition 数据
-        (str(ROOT / '.venv/lib/python3.14/site-packages/speech_recognition'), 'speech_recognition'),
-        # qrcode 数据
-        (str(ROOT / '.venv/lib/python3.14/site-packages/qrcode'), 'qrcode'),
+        # SSL 证书（httpx/requests 需要）
+        (str(VENV / 'certifi' / 'cacert.pem'), 'certifi'),
+        # edge-tts
+        (str(VENV / 'edge_tts'), 'edge_tts'),
+        # speech_recognition
+        (str(VENV / 'speech_recognition'), 'speech_recognition'),
+        # qrcode
+        (str(VENV / 'qrcode'), 'qrcode'),
+        # anyio 后端（动态加载，必须作为数据带入）
+        (str(VENV / 'anyio'), 'anyio'),
+        # httpcore
+        (str(VENV / 'httpcore'), 'httpcore'),
     ],
     hiddenimports=[
         # PyQt6
@@ -32,10 +39,23 @@ a = Analysis(
         'PyQt6.QtWidgets',
         'PyQt6.QtMultimedia',
         'PyQt6.sip',
-        # 网络 / 异步
+        # anthropic + httpx 依赖链
+        'anthropic',
+        'anthropic.lib.streaming',
+        'anthropic.lib.streaming._messages',
+        'httpx',
+        'httpx._transports.default',
+        'httpcore',
+        'httpcore._async.http11',
+        'httpcore._sync.http11',
+        'certifi',
+        # anyio 后端（动态 import，PyInstaller 检测不到）
+        'anyio',
+        'anyio._backends._asyncio',
+        'anyio._backends._trio',
+        'sniffio',
+        # 异步
         'asyncio',
-        'aiohttp',
-        'websockets',
         # edge-tts
         'edge_tts',
         'edge_tts.communicate',
@@ -53,9 +73,6 @@ a = Analysis(
         'qrcode.image.pil',
         'PIL',
         'PIL.Image',
-        # anthropic
-        'anthropic',
-        'httpx',
         # dotenv
         'dotenv',
         # misc
@@ -65,7 +82,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['runtime_hook.py'],
     excludes=[
         'tkinter', 'matplotlib', 'numpy', 'pandas',
         'IPython', 'jupyter', 'notebook',
@@ -75,6 +92,64 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+# ── Mac .app ──────────────────────────────────────────────
+if sys.platform == 'darwin':
+    exe = EXE(
+        pyz, a.scripts, [],
+        exclude_binaries=True,
+        name='ClaudioFM',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+    coll = COLLECT(
+        exe, a.binaries, a.zipfiles, a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='ClaudioFM',
+    )
+    app = BUNDLE(
+        coll,
+        name='ClaudioFM.app',
+        icon=None,
+        bundle_identifier='com.claudiofm.app',
+        info_plist={
+            'NSMicrophoneUsageDescription': 'Claudio FM 需要麦克风权限用于语音输入',
+            'CFBundleShortVersionString': '1.0.0',
+            'CFBundleVersion': '1.0.0',
+            'NSHighResolutionCapable': True,
+        },
+    )
+
+# ── Windows .exe ──────────────────────────────────────────
+else:
+    exe = EXE(
+        pyz, a.scripts, a.binaries, a.zipfiles, a.datas, [],
+        name='ClaudioFM',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=None,
+    )
+
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
