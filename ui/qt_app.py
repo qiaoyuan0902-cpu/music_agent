@@ -1124,6 +1124,12 @@ class QueuePanel(QFrame):
                 border: none;
                 background: {card};
             }}
+            QTabWidget::tab-bar {{
+                alignment: left;
+            }}
+            QTabBar {{
+                background: {bg};
+            }}
             QTabBar::tab {{
                 background: {bg};
                 color: {muted};
@@ -1141,6 +1147,9 @@ class QueuePanel(QFrame):
             }}
             QTabBar::tab:hover {{
                 color: {text};
+            }}
+            QTabBar::scroller {{
+                width: 0px;
             }}
         """)
         for frame in (self.hdr_frame, self.ai_hdr_frame, self.lyrics_hdr_frame):
@@ -1753,6 +1762,7 @@ class MainWindow(QMainWindow):
         self._apply_bg(tm().colors)
 
         self._shuffle = False
+        self._play_context = "queue"   # "queue" | "ai"
 
         self._start_loader()
 
@@ -1862,6 +1872,7 @@ class MainWindow(QMainWindow):
         songs = self.queue._songs
         if not songs or idx >= len(songs):
             return
+        self._play_context = "queue"
         self.queue.set_current(idx)
         self.player.load_song(songs[idx])
         self._fetch_lyrics(songs[idx])
@@ -1870,31 +1881,78 @@ class MainWindow(QMainWindow):
         self._shuffle = enabled
 
     def _on_prev(self):
-        songs = self.queue._songs
-        if not songs:
-            return
-        idx = max(0, self.queue._current - 1)
-        self._on_song_selected(idx)
+        if self._play_context == "ai":
+            self._ai_prev()
+        else:
+            songs = self.queue._songs
+            if not songs:
+                return
+            idx = max(0, self.queue._current - 1)
+            self._on_song_selected(idx)
 
     def _on_next(self):
-        songs = self.queue._songs
+        if self._play_context == "ai":
+            self._ai_next()
+        else:
+            songs = self.queue._songs
+            if not songs:
+                return
+            if self._shuffle:
+                current = self.queue._current
+                choices = [i for i in range(len(songs)) if i != current]
+                idx = random.choice(choices) if choices else current
+            else:
+                idx = (self.queue._current + 1) % len(songs)
+            self._on_song_selected(idx)
+
+    def _ai_prev(self):
+        songs = self.queue._ai_songs
         if not songs:
             return
+        cur_id = getattr(self.queue, "_ai_current_id", None)
+        ids = [s.get("id") for s in songs]
+        try:
+            idx = ids.index(cur_id)
+        except ValueError:
+            idx = 0
+        idx = max(0, idx - 1)
+        self._play_ai_at(idx)
+
+    def _ai_next(self):
+        songs = self.queue._ai_songs
+        if not songs:
+            return
+        cur_id = getattr(self.queue, "_ai_current_id", None)
+        ids = [s.get("id") for s in songs]
+        try:
+            idx = ids.index(cur_id)
+        except ValueError:
+            idx = -1
         if self._shuffle:
-            current = self.queue._current
-            choices = [i for i in range(len(songs)) if i != current]
-            idx = random.choice(choices) if choices else current
+            choices = [i for i in range(len(songs)) if i != idx]
+            idx = random.choice(choices) if choices else idx
         else:
-            idx = (self.queue._current + 1) % len(songs)
-        self._on_song_selected(idx)
+            idx = (idx + 1) % len(songs)
+        self._play_ai_at(idx)
+
+    def _play_ai_at(self, idx: int):
+        songs = self.queue._ai_songs
+        if not songs or idx >= len(songs):
+            return
+        song = songs[idx]
+        self.queue.set_ai_current(song)
+        self.player.load_song(song)
+        self._fetch_lyrics(song)
 
     def _on_ai_song_selected(self, song: dict):
+        self._play_context = "ai"
         self.queue.set_ai_current(song)
         self.player.load_song(song)
         self._fetch_lyrics(song)
 
     def _on_chat_play(self, song: dict):
         """AI 要求播放某首歌：加入 AI 点歌列表并播放"""
+        self._play_context = "ai"
         self.queue.add_ai_song(song)
         self.queue.set_ai_current(song)
         if conv_store:
