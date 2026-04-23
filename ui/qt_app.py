@@ -274,7 +274,16 @@ class StreamWorker(QThread):
             import traceback
             err = traceback.format_exc()
             print(f"[StreamWorker] ERROR:\n{err}")
-            self.chunk.emit(f"\n\n⚠️ 出错了：{e}")
+            # 写到日志文件，打包后也能查看
+            try:
+                from config import USER_DATA_DIR
+                log_path = USER_DATA_DIR / "claudio_error.log"
+                with open(log_path, "a", encoding="utf-8") as f:
+                    from datetime import datetime
+                    f.write(f"\n[{datetime.now()}]\n{err}\n")
+            except Exception:
+                pass
+            self.chunk.emit(f"\n\n⚠️ 出错了：{type(e).__name__}: {e}")
         finally:
             self.done.emit()
 

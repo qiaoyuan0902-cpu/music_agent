@@ -22,10 +22,11 @@ def _user_data_dir() -> Path:
 USER_DATA_DIR = _user_data_dir()
 
 # 优先加载用户数据目录的 .env，再 fallback 到项目目录
+# override=True 确保每次都用文件里的值覆盖环境变量
 _env_candidates = [USER_DATA_DIR / ".env", Path(__file__).parent / ".env"]
 for _p in _env_candidates:
     if _p.exists():
-        load_dotenv(_p)
+        load_dotenv(_p, override=True)
         break
 
 # ── API Keys ──────────────────────────────────────────────
