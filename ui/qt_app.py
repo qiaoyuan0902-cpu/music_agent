@@ -715,7 +715,8 @@ class PlayerBar(QFrame):
 
     def _on_url_ready(self, url: str):
         if not url:
-            self.status_lbl.setText("无法获取播放链接")
+            # URL fetch failed — retry once, then skip
+            self._retry_url()
             return
         # re-assert audio output in case stop() reset it on macOS
         self._player.setAudioOutput(self._audio_out)
@@ -774,12 +775,36 @@ class PlayerBar(QFrame):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.request_next.emit()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
-            # URL 失效（过期或网络问题），重新拉取一次
+            self._retry_url()
+        elif status == QMediaPlayer.MediaStatus.StalledMedia:
+            # Network stall — start a 12s watchdog, retry if still stalled
+            if not hasattr(self, "_stall_timer"):
+                self._stall_timer = QTimer(self)
+                self._stall_timer.setSingleShot(True)
+                self._stall_timer.timeout.connect(self._on_stall_timeout)
+            self._stall_timer.start(12000)
+        elif status == QMediaPlayer.MediaStatus.BufferingMedia:
+            # Recovered from stall — cancel watchdog
+            if hasattr(self, "_stall_timer"):
+                self._stall_timer.stop()
+        elif status == QMediaPlayer.MediaStatus.LoadedMedia:
+            if hasattr(self, "_stall_timer"):
+                self._stall_timer.stop()
+
+    def _on_stall_timeout(self):
+        if self._player.mediaStatus() == QMediaPlayer.MediaStatus.StalledMedia:
+            print("[player] stall timeout, retrying")
             self._retry_url()
 
     def _on_player_error(self, err, msg: str):
         print(f"[player] error {err}: {msg}")
-        self._retry_url()
+        # Only retry on recoverable errors (network/resource), not format errors
+        recoverable = {
+            QMediaPlayer.Error.ResourceError,
+            QMediaPlayer.Error.NetworkError,
+        }
+        if err in recoverable:
+            self._retry_url()
 
     def _retry_url(self):
         """URL 失效时重新拉取，最多重试 1 次，失败则跳下一首"""
@@ -1926,8 +1951,15 @@ class MainWindow(QMainWindow):
     def _fetch_lyrics(self, song: dict):
         """Fetch lyrics in background and populate the lyrics tab."""
         name = song.get("name", "")
-        self.queue.set_lyrics(name, [])   # clear immediately
-        self._lyrics_worker = LyricsWorker(song["id"])
+        song_id = song.get("id")
+        self.queue.set_lyrics(name, [])
+        # Disconnect previous worker to avoid stale callback
+        if hasattr(self, "_lyrics_worker") and self._lyrics_worker is not None:
+            try:
+                self._lyrics_worker.lyrics_ready.disconnect()
+            except Exception:
+                pass
+        self._lyrics_worker = LyricsWorker(song_id)
         self._lyrics_worker.lyrics_ready.connect(
             lambda lines, n=name: self.queue.set_lyrics(n, lines)
         )
