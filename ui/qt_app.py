@@ -1163,6 +1163,7 @@ class QueuePanel(QFrame):
         pal.setColor(QPalette.ColorRole.Button, _QColor(bg))
         self.tabs.tabBar().setPalette(pal)
         self.tabs.tabBar().setAutoFillBackground(True)
+        self.tabs.tabBar().setExpanding(True)   # tabs fill full width, no gap
         for frame in (self.hdr_frame, self.ai_hdr_frame, self.lyrics_hdr_frame):
             frame.setStyleSheet(f"background:{card}; border-bottom:1px solid {border};")
         self.hdr_title.setStyleSheet(f"color:{text}; letter-spacing:2px;")
