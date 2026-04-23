@@ -156,3 +156,30 @@ def fmt_duration(ms: int) -> str:
     s = ms // 1000
     return f"{s // 60}:{s % 60:02d}"
 
+
+def parse_lrc(lrc: str) -> list:
+    """解析 LRC 格式歌词，返回 [(ms, text), ...] 按时间排序"""
+    import re
+    pattern = re.compile(r'\[(\d+):(\d+(?:\.\d+)?)\](.*)')
+    lines = []
+    for line in lrc.splitlines():
+        m = pattern.match(line)
+        if m:
+            mins, secs, text = m.groups()
+            ms = int(mins) * 60000 + int(float(secs) * 1000)
+            text = text.strip()
+            if text:
+                lines.append((ms, text))
+    return sorted(lines, key=lambda x: x[0])
+
+
+def get_lyrics(song_id: int) -> list:
+    """获取歌词，返回 [(ms, text), ...]。无歌词或纯文本歌词返回空列表。"""
+    try:
+        r = apis.track.GetTrackLyrics(song_id)
+        lrc = r.get("lrc", {}).get("lyric", "")
+        lines = parse_lrc(lrc)
+        return lines
+    except Exception:
+        return []
+

@@ -26,7 +26,7 @@ except ImportError:
 try:
     from music.netease import (
         load_session, get_qr_code, poll_qr_login,
-        get_liked_songs, get_user_profile, fmt_duration, get_song_url,
+        get_liked_songs, get_user_profile, fmt_duration, get_song_url, get_lyrics,
     )
     HAS_NETEASE = True
 except Exception as _ne_err:
@@ -237,6 +237,24 @@ class UrlFetchWorker(QThread):
     def run(self):
         url = get_song_url(self.song_id) if HAS_NETEASE else ""
         self.url_ready.emit(url)
+
+
+class LyricsWorker(QThread):
+    lyrics_ready = pyqtSignal(list)   # list of (ms, text) tuples
+
+    def __init__(self, song_id: int):
+        super().__init__()
+        self.song_id = song_id
+
+    def run(self):
+        if not HAS_NETEASE:
+            self.lyrics_ready.emit([])
+            return
+        try:
+            from music.netease import get_lyrics
+            self.lyrics_ready.emit(get_lyrics(self.song_id))
+        except Exception:
+            self.lyrics_ready.emit([])
 
 
 # ── StreamWorker ──────────────────────────────────────────
@@ -533,7 +551,8 @@ class PlayerBar(QFrame):
     # signals for MainWindow to call prev/next
     request_prev    = pyqtSignal()
     request_next    = pyqtSignal()
-    shuffle_changed = pyqtSignal(bool)   # emits new shuffle state
+    shuffle_changed = pyqtSignal(bool)
+    position_changed = pyqtSignal(int)   # current position in ms
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -715,6 +734,7 @@ class PlayerBar(QFrame):
         if dur > 0:
             self.prog.setValue(int(pos_ms / dur * 1000))
         self.t_cur.setText(fmt_duration(pos_ms) if HAS_NETEASE else "")
+        self.position_changed.emit(pos_ms)
 
     def _on_duration(self, dur_ms: int):
         self.t_tot.setText(fmt_duration(dur_ms) if HAS_NETEASE else "")
@@ -864,6 +884,42 @@ class QueuePanel(QFrame):
 
         self.tabs.addTab(ai_w, "AI 点歌")
 
+        # ── Tab 2: 歌词 ───────────────────────────────────
+        lyrics_w = QWidget()
+        lyl = QVBoxLayout(lyrics_w)
+        lyl.setContentsMargins(0, 0, 0, 0)
+        lyl.setSpacing(0)
+
+        self.lyrics_hdr_frame = QFrame()
+        self.lyrics_hdr_frame.setFixedHeight(32)
+        lyhl = QHBoxLayout(self.lyrics_hdr_frame)
+        lyhl.setContentsMargins(16, 0, 16, 0)
+        self.lyrics_hdr_title = QLabel("歌词")
+        self.lyrics_hdr_title.setFont(mono(9, True))
+        self.lyrics_song_lbl = QLabel("")
+        self.lyrics_song_lbl.setFont(mono(8))
+        lyhl.addWidget(self.lyrics_hdr_title)
+        lyhl.addStretch()
+        lyhl.addWidget(self.lyrics_song_lbl)
+        lyl.addWidget(self.lyrics_hdr_frame)
+
+        self.lyrics_scroll = QScrollArea()
+        self.lyrics_scroll.setWidgetResizable(True)
+        self.lyrics_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._lyrics_container = QWidget()
+        self._lyrics_lay = QVBoxLayout(self._lyrics_container)
+        self._lyrics_lay.setContentsMargins(0, 24, 0, 24)
+        self._lyrics_lay.setSpacing(0)
+        self._lyrics_lay.addStretch()
+        self.lyrics_scroll.setWidget(self._lyrics_container)
+        lyl.addWidget(self.lyrics_scroll)
+
+        self.tabs.addTab(lyrics_w, "歌词")
+
+        self._lyrics: list = []          # [(ms, text), ...]
+        self._lyrics_labels: list = []
+        self._lyrics_current = -1
+
         self._apply_theme(tm().colors)
         tm().theme_changed.connect(self._apply_theme)
 
@@ -974,6 +1030,68 @@ class QueuePanel(QFrame):
                 row._song_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
                 row._art_l.setStyleSheet(f"color:{c['TEXT_MUTED']};")
 
+    # ── lyrics ────────────────────────────────────────────
+    def set_lyrics(self, song_name: str, lines: list):
+        """Set lyrics for the current song. lines = [(ms, text), ...]"""
+        self._lyrics = lines
+        self._lyrics_current = -1
+        self._lyrics_labels.clear()
+        # Clear old labels
+        while self._lyrics_lay.count() > 1:
+            item = self._lyrics_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self.lyrics_song_lbl.setText(song_name[:22] if song_name else "")
+        c = tm().colors
+
+        if not lines:
+            lbl = QLabel("暂无歌词")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setFont(mono(10))
+            lbl.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+            lbl.setContentsMargins(0, 8, 0, 8)
+            self._lyrics_lay.insertWidget(0, lbl)
+            return
+
+        for ms, text in lines:
+            lbl = QLabel(text)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setFont(mono(11))
+            lbl.setWordWrap(True)
+            lbl.setContentsMargins(16, 7, 16, 7)
+            lbl.setStyleSheet(f"color:{c['TEXT_MUTED']};")
+            self._lyrics_labels.append(lbl)
+            self._lyrics_lay.insertWidget(self._lyrics_lay.count() - 1, lbl)
+
+    def update_lyrics_position(self, ms: int):
+        """Highlight the lyric line matching the current playback position."""
+        if not self._lyrics or not self._lyrics_labels:
+            return
+        # Find the last line whose timestamp <= ms
+        idx = 0
+        for i, (t, _) in enumerate(self._lyrics):
+            if t <= ms:
+                idx = i
+            else:
+                break
+        if idx == self._lyrics_current:
+            return
+        c = tm().colors
+        # Unhighlight previous
+        if 0 <= self._lyrics_current < len(self._lyrics_labels):
+            self._lyrics_labels[self._lyrics_current].setFont(mono(11))
+            self._lyrics_labels[self._lyrics_current].setStyleSheet(
+                f"color:{c['TEXT_MUTED']};"
+            )
+        # Highlight current
+        self._lyrics_current = idx
+        lbl = self._lyrics_labels[idx]
+        lbl.setFont(mono(12, True))
+        lbl.setStyleSheet(f"color:{c['ACCENT']}; font-weight:bold;")
+        # Scroll to center the current line
+        QTimer.singleShot(0, lambda: self.lyrics_scroll.ensureWidgetVisible(lbl, 0, 80))
+
     # ── helpers ───────────────────────────────────────────
     def _make_row(self, name: str, artist: str, num: str) -> QFrame:
         row = QFrame()
@@ -1025,15 +1143,17 @@ class QueuePanel(QFrame):
                 color: {text};
             }}
         """)
-        for frame in (self.hdr_frame, self.ai_hdr_frame):
+        for frame in (self.hdr_frame, self.ai_hdr_frame, self.lyrics_hdr_frame):
             frame.setStyleSheet(f"background:{card}; border-bottom:1px solid {border};")
         self.hdr_title.setStyleSheet(f"color:{text}; letter-spacing:2px;")
         self.hdr_count.setStyleSheet(f"color:{muted};")
         self.ai_hdr_title.setStyleSheet(f"color:{text}; letter-spacing:2px;")
         self.ai_hdr_count.setStyleSheet(f"color:{muted};")
-        for s in (self.scroll, self.ai_scroll):
+        self.lyrics_hdr_title.setStyleSheet(f"color:{text}; letter-spacing:2px;")
+        self.lyrics_song_lbl.setStyleSheet(f"color:{muted};")
+        for s in (self.scroll, self.ai_scroll, self.lyrics_scroll):
             s.setStyleSheet(f"background:{card}; border:none;")
-        for cont in (self._container, self._ai_container):
+        for cont in (self._container, self._ai_container, self._lyrics_container):
             cont.setStyleSheet(f"background:{card};")
         self._refresh_rows()
         self._refresh_ai_rows()
@@ -1626,6 +1746,7 @@ class MainWindow(QMainWindow):
         self.player.request_prev.connect(self._on_prev)
         self.player.request_next.connect(self._on_next)
         self.player.shuffle_changed.connect(self._on_shuffle_changed)
+        self.player.position_changed.connect(self.queue.update_lyrics_position)
         self.nav.login_clicked.connect(self._show_qr_dialog)
         self.chat.play_song.connect(self._on_chat_play)
         tm().theme_changed.connect(self._apply_bg)
@@ -1727,12 +1848,23 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
+    def _fetch_lyrics(self, song: dict):
+        """Fetch lyrics in background and populate the lyrics tab."""
+        name = song.get("name", "")
+        self.queue.set_lyrics(name, [])   # clear immediately
+        self._lyrics_worker = LyricsWorker(song["id"])
+        self._lyrics_worker.lyrics_ready.connect(
+            lambda lines, n=name: self.queue.set_lyrics(n, lines)
+        )
+        self._lyrics_worker.start()
+
     def _on_song_selected(self, idx: int):
         songs = self.queue._songs
         if not songs or idx >= len(songs):
             return
         self.queue.set_current(idx)
         self.player.load_song(songs[idx])
+        self._fetch_lyrics(songs[idx])
 
     def _on_shuffle_changed(self, enabled: bool):
         self._shuffle = enabled
@@ -1759,6 +1891,7 @@ class MainWindow(QMainWindow):
     def _on_ai_song_selected(self, song: dict):
         self.queue.set_ai_current(song)
         self.player.load_song(song)
+        self._fetch_lyrics(song)
 
     def _on_chat_play(self, song: dict):
         """AI 要求播放某首歌：加入 AI 点歌列表并播放"""
@@ -1770,6 +1903,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self.player.load_song(song)
+        self._fetch_lyrics(song)
 
 
 # ── launch ────────────────────────────────────────────────
