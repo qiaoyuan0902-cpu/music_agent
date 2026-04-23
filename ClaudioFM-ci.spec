@@ -27,6 +27,7 @@ a = Analysis(
         'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
         'PyQt6.QtMultimedia', 'PyQt6.sip',
         'anthropic', 'anthropic.lib.streaming', 'anthropic.lib.streaming._messages',
+        'openai', 'openai.resources', 'openai._streaming',
         'httpx', 'httpx._transports.default',
         'httpcore', 'httpcore._async.http11', 'httpcore._sync.http11',
         'certifi',

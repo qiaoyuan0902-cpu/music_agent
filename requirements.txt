@@ -1,5 +1,6 @@
 # LLM
 anthropic>=0.96.0
+openai>=1.30.0
 
 # NetEase Music
 pyncm>=1.5.0

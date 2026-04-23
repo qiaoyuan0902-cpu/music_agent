@@ -1,7 +1,7 @@
-import os
 import requests
 
 _QWEATHER_HOST = "p24wcv8myb.re.qweatherapi.com"
+_QWEATHER_KEY  = "9ecd9e9e7237402ea98698d4bac6ef69"
 
 # icon code → weather_main (matches existing emoji map in qt_app.py)
 def _icon_to_main(icon: str) -> str:
@@ -22,15 +22,11 @@ def _icon_to_main(icon: str) -> str:
 
 
 def get_weather(location_id: str) -> dict:
-    api_key = os.getenv("QWEATHER_API_KEY", "")
-    if not api_key:
-        return _mock_weather(location_id)
-
     try:
         resp = requests.get(
             f"https://{_QWEATHER_HOST}/v7/weather/now",
             params={"location": location_id, "lang": "zh", "unit": "m"},
-            headers={"X-QW-Api-Key": api_key},
+            headers={"X-QW-Api-Key": _QWEATHER_KEY},
             timeout=8,
         )
         data = resp.json()

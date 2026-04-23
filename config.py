@@ -32,9 +32,9 @@ for _p in _env_candidates:
 # ── API Keys ──────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "")
-QWEATHER_API_KEY = os.getenv("QWEATHER_API_KEY", "")
 
 # ── 模型配置 ──────────────────────────────────────────────
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "claude")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = 4096
 MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "20"))
