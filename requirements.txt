@@ -14,7 +14,8 @@ PyQt6>=6.6.0
 # TTS & Speech
 edge-tts>=7.0.0
 SpeechRecognition>=3.10.0
-pyaudio>=0.2.14
+# Windows 用 pipwin 装 pyaudio；Mac/Linux 直接 pip
+pyaudio>=0.2.14; sys_platform != "win32"
 
 # Config
 python-dotenv>=1.0.0

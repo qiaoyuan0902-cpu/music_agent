@@ -1,0 +1,90 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'          # 推 tag（如 v1.0.0）时触发
+  workflow_dispatch:  # 也可以在 GitHub 网页手动触发
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build .app
+        run: pyinstaller --noconfirm ClaudioFM-ci.spec
+
+      - name: Zip .app
+        run: |
+          cd dist
+          zip -r ClaudioFM-mac.zip ClaudioFM.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudioFM-mac
+          path: dist/ClaudioFM-mac.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pipwin
+          pipwin install pyaudio
+          pip install pyinstaller
+
+      - name: Build .exe
+        run: pyinstaller --noconfirm ClaudioFM-ci.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudioFM-windows
+          path: dist/ClaudioFM.exe
+
+  release:
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ClaudioFM-mac
+
+      - name: Download windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ClaudioFM-windows
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ClaudioFM-mac.zip
+            ClaudioFM.exe
+          generate_release_notes: true

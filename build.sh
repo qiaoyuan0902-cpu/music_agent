@@ -12,7 +12,7 @@ echo "==> 清理旧构建..."
 rm -rf build dist
 
 echo "==> 开始打包..."
-pyinstaller ClaudioFM.spec
+pyinstaller --noconfirm ClaudioFM.spec
 
 echo ""
 echo "✅ 打包完成：dist/ClaudioFM.app"
